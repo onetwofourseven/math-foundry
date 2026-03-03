@@ -3,6 +3,9 @@ import json
 import requests
 import base64
 
+# HELPER: Get deployment name from env or default to gpt-4o
+DEPLOYMENT = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
+
 def find_prerequisite(topic, db_driver):
     query = """
     MATCH (m:MicroSkill {name: $topic})-[:REQUIRES_PREREQUISITE]->(p:MicroSkill)
@@ -15,23 +18,19 @@ def find_prerequisite(topic, db_driver):
 
 def generate_draft_script(student_name, grade, topic, prereq, interest, ai_client):
     scaffold = f"Connect '{topic}' to prior knowledge of '{prereq}'." if prereq else ""
-    prompt = f"""
-    You are Ananya, an elite AI tutor. Student: {student_name}, Grade: {grade}. 
-    Topic: '{topic}'. Interest: '{interest}'. {scaffold}
-    STRICT GUARDRAILS: ONLY teach Grade {grade} concepts. No advanced bleed.
-    Write a 3-sentence spoken script using an analogy about '{interest}'. NO MARKDOWN.
-    """
-    res = ai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
+    prompt = f"You are Ananya, an elite AI tutor. Student: {student_name}, Grade: {grade}. Topic: '{topic}'. Interest: '{interest}'. {scaffold} STRICT GUARDRAILS: ONLY teach Grade {grade} concepts. Write a 3-sentence spoken script. NO MARKDOWN."
+    
+    # Updated for Azure Deployment compatibility
+    res = ai_client.chat.completions.create(
+        model=DEPLOYMENT, 
+        messages=[{"role": "user", "content": prompt}]
+    )
     return res.choices[0].message.content.replace('*', '')
 
 def shadow_student_veto(script, grade, interest, ai_client):
-    prompt = f"""
-    You are a distracted {grade}yr old obsessed with {interest}. 
-    Read this: '{script}'. Is it boring? 
-    Return ONLY JSON: {{"approved": true, "feedback": "reason"}}
-    """
+    prompt = f"You are a distracted {grade}yr old obsessed with {interest}. Read: '{script}'. Is it boring? Return ONLY JSON: {{"approved": true, "feedback": "reason"}}"
     res = ai_client.chat.completions.create(
-        model="gpt-4o", 
+        model=DEPLOYMENT, 
         messages=[{"role": "user", "content": prompt}], 
         response_format={"type":"json_object"}
     )
@@ -39,13 +38,16 @@ def shadow_student_veto(script, grade, interest, ai_client):
 
 def rewrite_script(script, grade, interest, feedback, ai_client):
     prompt = f"Rewrite for a {grade}yr old. Feedback: {feedback}. Script: {script}"
-    res = ai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
+    res = ai_client.chat.completions.create(
+        model=DEPLOYMENT, 
+        messages=[{"role": "user", "content": prompt}]
+    )
     return res.choices[0].message.content.replace('*', '')
 
 def generate_visual_payload(script, ai_client):
     prompt = f"Design JSON visual payload (visual_type, screen_elements, animation_action) for: {script}"
     res = ai_client.chat.completions.create(
-        model="gpt-4o", 
+        model=DEPLOYMENT, 
         messages=[{"role": "user", "content": prompt}], 
         response_format={"type":"json_object"}
     )
@@ -62,10 +64,6 @@ def generate_audio_base64(script):
     return None
 
 def update_graph_memory(topic, db_driver):
-    query = """
-    MATCH (m:MicroSkill {name: $topic}) 
-    SET m.elo_rating = coalesce(m.elo_rating, 1200) + 10 
-    RETURN m.elo_rating
-    """
+    query = "MATCH (m:MicroSkill {name: $topic}) SET m.elo_rating = coalesce(m.elo_rating, 1200) + 10 RETURN m.elo_rating"
     with db_driver.session() as session:
         session.run(query, topic=topic)
